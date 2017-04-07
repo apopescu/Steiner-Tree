@@ -1,0 +1,169 @@
+model ModelName
+uses "mmxprs", "mmive";
+
+! procedures and functions
+forward function connected: integer
+forward procedure visit(n:integer)
+forward procedure clearVisited
+forward procedure printEdges
+forward procedure printSteinerNodes
+forward procedure printTerminalNodes
+forward procedure drawSolution
+	
+declarations
+	! number of graph nodes
+	n_nodes = 6
+	NODES = 1..n_nodes
+	
+	! terminal nodes
+	N_TERMINAL_NODES: integer
+	TERMINAL_NODES: set of integer
+	VISITED: array(1..n_nodes) of integer
+	
+	EDGES: array(NODES, NODES) of integer
+	WEIGHTS: array(NODES, NODES) of integer
+	x: dynamic array(NODES, NODES) of mpvar
+	
+	! filename
+	filename: string
+	
+	! (X, Y) coordinates
+	X,Y: array(NODES) of integer
+end-declarations
+
+! create filename based on number of nodes
+filename := string(n_nodes) + "nodes.dat"
+
+! read the file and initialize edges and costs(weights)
+initializations from filename
+	TERMINAL_NODES
+	EDGES
+	WEIGHTS
+	[X,Y] as 'POS'
+end-initializations
+
+! number of terminal nodes
+N_TERMINAL_NODES := getsize(TERMINAL_NODES)
+
+! create dynamically decision variables
+forall(i,j in NODES | i<j and EDGES(i,j)>=1) do
+	create(x(i,j))
+end-do
+
+! decision variables are binary variables
+forall (i in NODES, j in NODES | exists(x(i,j)) )x(i,j) is_binary
+
+! objective function
+cost := sum (i,j in NODES) WEIGHTS(i,j) * x(i,j)
+
+! constraint: terminal nodes needs to be present in the final tree
+! so there must be at least one incident edge on this type of node
+forall (i in TERMINAL_NODES) do
+	sum (j in NODES | i<j and exists(x(i,j)) ) x(i,j) + sum (j in NODES |  i>j and exists(x(j,i)) ) x(j,i) >=1
+end-do
+
+! initially 0 nodes are visited
+clearVisited
+
+! minimize the objective function
+minimize(cost)
+
+while (connected < N_TERMINAL_NODES) do   
+	minimize (cost); 
+	clearVisited
+	visit(TERMINAL_NODES(1))
+	
+	! check that all Steiner nodes are connected
+	if (connected = N_TERMINAL_NODES) 
+		then 
+			printEdges
+			drawSolution
+			break 
+		else
+		sum(i in NODES, j in NODES | exists(x(i,j)) and (VISITED(i)+VISITED(j)=1) ) x(i,j) >= 1
+	end-if
+end-do
+writeln("A tree was created. \nIt's a feasible solution.\n")
+
+printTerminalNodes
+writeln("")
+printSteinerNodes
+writeln("\n=================================================")
+
+
+! print Steiner nodes
+procedure printSteinerNodes
+	write("Steiner points: \t")
+	forall(i in NODES | VISITED(i)=1 ) do
+		if(i not in TERMINAL_NODES) then
+			write(i, "  ")
+		end-if
+	end-do
+end-procedure
+
+! print Terminal nodes
+procedure printTerminalNodes
+	write("Terminal points: \t")
+	forall(i in TERMINAL_NODES) write(i, "  ")
+end-procedure
+
+! The number of connected nodes, which creates a tree.
+! This number must be equal to the number of terminal nodes,
+! otherwise there is a cut and not all terminal nodes are connected.
+function connected: integer
+ returned:= sum(i in TERMINAL_NODES) VISITED(i)
+end-function
+
+
+! The number of nodes that can be visited
+procedure visit(n:integer)
+	if VISITED(n)<>1 then
+		VISITED(n):= 1 
+		
+		forall (m in NODES | n<m) do
+			if (getsol(x(n,m))<>0) then visit(m)
+			 end-if
+			end-do
+		forall (m in NODES | n>m) do
+			if (getsol(x(m,n))<>0) then visit(m) 
+			 end-if
+			end-do
+	end-if
+end-procedure
+
+! Initially no node was visited
+procedure clearVisited
+	forall (i in NODES) VISITED(i) := 0
+end-procedure
+
+! print solution
+procedure printEdges
+	writeln("=================================================\n")
+	writeln ("Solution cost: ",getobjval)
+	writeln( "Selected EDGES:")
+	forall (i in NODES, j in NODES | getsol(x(i,j)) <>0) 
+ 	 	writeln("\t\t(",i,",",j,")\t with  cost of ", WEIGHTS(i,j) ) 
+end-procedure
+
+! Print a graphical solution for the problem
+procedure drawSolution
+	IVEerase
+	IVEzoom(min(i in NODES) X(i)-10, min(i in NODES) Y(i)-10,
+      max(i in NODES) X(i)+10, max(i in NODES) Y(i)+10)
+	
+	plotEdge := IVEaddplot("Lato", IVE_BLUE)
+	forall(r in NODES) IVEdrawpoint(plotEdge, X(r), Y(r));
+	forall(i,j in NODES | i<j and getsol(x(i,j))=1)
+		IVEdrawline(plotEdge, X(i), Y(i), X(j), Y(j))
+	
+	! different colors for Terminal nodes and Steiner nodes
+	plotTerminals:= IVEaddplot("Terminal", IVE_RED)
+	plotSteiners := IVEaddplot("Steiner", IVE_BLACK)
+	forall(i in NODES) do
+		if(i not in TERMINAL_NODES) then
+			IVEdrawlabel(plotSteiners, X(i), Y(i), string(i))
+			else IVEdrawlabel(plotTerminals, X(i), Y(i), string(i))
+		end-if
+	end-do
+end-procedure
+end-model
